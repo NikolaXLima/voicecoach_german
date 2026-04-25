@@ -64,7 +64,7 @@ exports.handler = async function handler(event) {
       {
         headers: { Authorization: `Bearer ${apiKey}`, ...form.getHeaders() },
         maxBodyLength: Infinity,
-        timeout: 55000,
+        timeout: 22000, // 22 s — Netlify hard-kills at 26 s, leave 4 s for overhead
       }
     );
     return {
@@ -73,8 +73,11 @@ exports.handler = async function handler(event) {
       body: JSON.stringify(response.data),
     };
   } catch (err) {
-    const status  = err.response?.status || 500;
-    const message = err.response?.data?.error?.message || err.message;
+    const timedOut = err.code === 'ECONNABORTED' || err.code === 'ERR_CANCELED';
+    const status   = timedOut ? 504 : (err.response?.status || 500);
+    const message  = timedOut
+      ? 'Transkription dauerte zu lange. Bitte kürzer aufnehmen (max. 1–2 Minuten).'
+      : (err.response?.data?.error?.message || err.message);
     console.error('Whisper error', status, message);
     return {
       statusCode: status,

@@ -5,6 +5,9 @@
 [functions]
   node_bundler = "esbuild"
 
+[functions.transcribe]
+  timeout = 26
+
 # /transcribe on the static site → Netlify Function (keeps frontend code unchanged)
 [[redirects]]
   from   = "/transcribe"

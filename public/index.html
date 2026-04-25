@@ -395,7 +395,19 @@ async function transcribeWhisper(blob){
   const form=new FormData();
   form.append('file',blob,'recording.'+ext);
 
-  const res=await fetch('/transcribe',{method:'POST',body:form});
+  const ctrl=new AbortController();
+  const tid=setTimeout(()=>ctrl.abort(),25000); // 25 s client-side guard
+  let res;
+  try{
+    res=await fetch('/transcribe',{method:'POST',body:form,signal:ctrl.signal});
+  }catch(e){
+    clearTimeout(tid);
+    if(e.name==='AbortError')
+      throw new Error('Transkription dauerte zu lange. Bitte kürzer aufnehmen (max. 1–2 Minuten).');
+    throw e;
+  }
+  clearTimeout(tid);
+
   if(!res.ok){
     let msg='HTTP '+res.status;
     try{const j=await res.json();msg=j.error||msg;}catch(e){}
