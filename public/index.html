@@ -396,14 +396,19 @@ async function transcribeWhisper(blob){
   form.append('file',blob,'recording.'+ext);
 
   const ctrl=new AbortController();
-  const tid=setTimeout(()=>ctrl.abort(),25000); // 25 s client-side guard
+  const tid=setTimeout(()=>{console.log('[debug] AbortController fired after 25s');ctrl.abort();},25000); // 25 s client-side guard
   let res;
+  console.log('[debug] fetch /transcribe START',new Date().toISOString(),'| blob size:',(blob.size/1024).toFixed(1)+'KB','| type:',blob.type);
   try{
     res=await fetch('/transcribe',{method:'POST',body:form,signal:ctrl.signal});
+    console.log('[debug] fetch /transcribe RESPONSE',res.status,new Date().toISOString());
   }catch(e){
     clearTimeout(tid);
-    if(e.name==='AbortError')
+    if(e.name==='AbortError'){
+      console.log('[debug] fetch ABORTED (AbortError)');
       throw new Error('Transkription dauerte zu lange. Bitte kürzer aufnehmen (max. 1–2 Minuten).');
+    }
+    console.log('[debug] fetch ERROR:',e.name,e.message);
     throw e;
   }
   clearTimeout(tid);
@@ -795,6 +800,7 @@ async function doAnalysis(){
 
     setMsg('Wird transkribiert …','Audio wird an OpenAI Whisper übertragen …');
     const wavBlob=await toWav(aBuf);
+    console.log('[debug] WAV blob size:',(wavBlob.size/1024).toFixed(1)+'KB','| duration:',recDuration.toFixed(1)+'s');
     const{text,segments,language}=await transcribeWhisper(wavBlob);
 
     const prev=text.length>60?text.slice(0,60)+' …':text||'(kein Text erkannt)';
