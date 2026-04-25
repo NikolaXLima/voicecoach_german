@@ -1,0 +1,12 @@
+[build]
+  publish   = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# /transcribe on the static site → Netlify Function (keeps frontend code unchanged)
+[[redirects]]
+  from   = "/transcribe"
+  to     = "/.netlify/functions/transcribe"
+  status = 200
