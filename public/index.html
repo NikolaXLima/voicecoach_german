@@ -820,9 +820,10 @@ async function doAnalysis(){
 
   }catch(err){
     console.error(err);
-    document.getElementById('analyzingState').innerHTML=
-      `<p style="color:var(--bad);margin-bottom:16px;max-width:400px;margin-left:auto;margin-right:auto">${err.message}</p>
-       <button class="btn-ghost" onclick="resetApp()">Neu starten</button>`;
+    // Use setMsg so the DOM structure stays intact (resetApp needs #analyzingMsg to exist)
+    setMsg('Fehler bei der Analyse', err.message);
+    document.getElementById('analyzingSubMsg').insertAdjacentHTML('afterend',
+      `<button class="btn-ghost" onclick="resetApp()" style="margin-top:16px">Neu starten</button>`);
   }
 }
 
@@ -1236,6 +1237,11 @@ function renderTranscript(r){
 function resetApp(){
   audioChunks=[]; recDuration=0;
   ['resultsSection','analyzingState'].forEach(id=>(document.getElementById(id).style.display='none'));
+  // Restore analyzingState structure (catch block may have appended elements)
+  document.getElementById('analyzingState').innerHTML=
+    '<div class="spinner"></div>'+
+    '<div id="analyzingMsg">Wird transkribiert …</div>'+
+    '<div id="analyzingSubMsg">Audio wird an OpenAI Whisper übertragen</div>';
   document.getElementById('recordSection').style.display='block';
   document.getElementById('recordBtn').classList.remove('active');
   document.getElementById('iconMic').style.display='block';

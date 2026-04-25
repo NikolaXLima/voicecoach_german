@@ -20,6 +20,7 @@ exports.handler = async function handler(event) {
   try {
     ({ fileBuffer, filename, mimetype } = await parseMultipart(event));
   } catch (err) {
+    console.error('parseMultipart error:', err.message);
     return {
       statusCode: 400,
       headers: { 'Content-Type': 'application/json' },
@@ -27,7 +28,7 @@ exports.handler = async function handler(event) {
     };
   }
 
-  if (!fileBuffer) {
+  if (!fileBuffer || fileBuffer.length === 0) {
     return {
       statusCode: 400,
       headers: { 'Content-Type': 'application/json' },
@@ -35,10 +36,20 @@ exports.handler = async function handler(event) {
     };
   }
 
+  // Detect format from file magic bytes so the name/type is always correct
+  const isWav  = fileBuffer[0] === 0x52 && fileBuffer[1] === 0x49; // "RI" (RIFF)
+  const isOgg  = fileBuffer[0] === 0x4F && fileBuffer[1] === 0x67; // "Og"
+  const isMp4  = fileBuffer[4] === 0x66 && fileBuffer[5] === 0x74; // "ft" (ftyp)
+  const detectedExt  = isWav ? 'wav' : isOgg ? 'ogg' : isMp4 ? 'mp4' : 'webm';
+  const detectedMime = isWav ? 'audio/wav' : isOgg ? 'audio/ogg' : isMp4 ? 'audio/mp4' : 'audio/webm';
+
+  console.log('Audio received — size:', fileBuffer.length,
+    'bytes | ext:', detectedExt, '| isBase64Encoded:', event.isBase64Encoded);
+
   const form = new FormData();
   form.append('file', fileBuffer, {
-    filename:    filename || 'recording.webm',
-    contentType: mimetype  || 'audio/webm',
+    filename:    'recording.' + detectedExt,
+    contentType: detectedMime,
   });
   form.append('model',           'whisper-1');
   form.append('language',        'de');
@@ -64,7 +75,7 @@ exports.handler = async function handler(event) {
   } catch (err) {
     const status  = err.response?.status || 500;
     const message = err.response?.data?.error?.message || err.message;
-    console.error('Whisper-Fehler', status, message);
+    console.error('Whisper error', status, message);
     return {
       statusCode: status,
       headers: { 'Content-Type': 'application/json' },
@@ -75,10 +86,12 @@ exports.handler = async function handler(event) {
 
 function parseMultipart(event) {
   return new Promise((resolve, reject) => {
-    const bb = Busboy({ headers: { 'content-type': event.headers['content-type'] } });
+    const contentType = event.headers['content-type'] || event.headers['Content-Type'] || '';
+    const bb = Busboy({ headers: { 'content-type': contentType } });
+
     let fileBuffer = null;
-    let filename   = 'recording.webm';
-    let mimetype   = 'audio/webm';
+    let filename   = 'recording.wav';
+    let mimetype   = 'audio/wav';
 
     bb.on('file', (_field, file, info) => {
       filename = info.filename || filename;
@@ -91,9 +104,11 @@ function parseMultipart(event) {
     bb.on('finish', () => resolve({ fileBuffer, filename, mimetype }));
     bb.on('error',  reject);
 
+    // Binary body: Netlify base64-encodes it (isBase64Encoded=true).
+    // If not base64, use 'binary'/latin1 — NOT utf8 — to preserve bytes > 127.
     const body = event.isBase64Encoded
       ? Buffer.from(event.body, 'base64')
-      : Buffer.from(event.body || '');
+      : Buffer.from(event.body || '', 'binary');
 
     bb.write(body);
     bb.end();
