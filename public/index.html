@@ -358,10 +358,40 @@ function setMsg(m,s){
 }
 
 // ═══════════════════════════════════════════
+//  WAV CONVERSION  (browser-side, 16 kHz mono)
+// ═══════════════════════════════════════════
+async function toWav(audioBuf){
+  const targetSR=16000;
+  const offCtx=new OfflineAudioContext(1,Math.ceil(audioBuf.duration*targetSR),targetSR);
+  const src=offCtx.createBufferSource();
+  src.buffer=audioBuf;
+  src.connect(offCtx.destination);
+  src.start(0);
+  const resampled=await offCtx.startRendering();
+  const samples=resampled.getChannelData(0);
+
+  const buf=new ArrayBuffer(44+samples.length*2);
+  const v=new DataView(buf);
+  const ws=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  ws(0,'RIFF'); v.setUint32(4,36+samples.length*2,true);
+  ws(8,'WAVE'); ws(12,'fmt ');
+  v.setUint32(16,16,true);  v.setUint16(20,1,true);
+  v.setUint16(22,1,true);   v.setUint32(24,targetSR,true);
+  v.setUint32(28,targetSR*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+  ws(36,'data'); v.setUint32(40,samples.length*2,true);
+  let off=44;
+  for(let i=0;i<samples.length;i++){
+    const s=Math.max(-1,Math.min(1,samples[i]));
+    v.setInt16(off,s<0?s*0x8000:s*0x7FFF,true); off+=2;
+  }
+  return new Blob([buf],{type:'audio/wav'});
+}
+
+// ═══════════════════════════════════════════
 //  WHISPER  (proxied through backend)
 // ═══════════════════════════════════════════
 async function transcribeWhisper(blob){
-  const ext=blob.type.includes('mp4')?'mp4':blob.type.includes('ogg')?'ogg':'webm';
+  const ext=blob.type.includes('wav')?'wav':blob.type.includes('mp4')?'mp4':blob.type.includes('ogg')?'ogg':'webm';
   const form=new FormData();
   form.append('file',blob,'recording.'+ext);
 
@@ -742,18 +772,21 @@ async function doAnalysis(){
   try{
     const blob=new Blob(audioChunks,{type:audioChunks[0]?.type||'audio/webm'});
 
-    setMsg('Wird transkribiert …','Audio wird an OpenAI Whisper übertragen …');
-    const{text,segments,language}=await transcribeWhisper(blob);
-
-    const prev=text.length>60?text.slice(0,60)+' …':text||'(kein Text erkannt)';
-    setMsg('Analyse läuft …','„'+prev+'"');
-
+    // Decode once — reuse for analysis AND WAV conversion
+    setMsg('Audio wird vorbereitet …','Konvertierung zu WAV …');
     const ab=await blob.arrayBuffer();
     const dCtx=new AudioContext();
     const aBuf=await dCtx.decodeAudioData(ab);
     const raw=aBuf.getChannelData(0),sr=aBuf.sampleRate;
     const dur=raw.length/sr;
     if(dur>1)recDuration=dur;
+
+    setMsg('Wird transkribiert …','Audio wird an OpenAI Whisper übertragen …');
+    const wavBlob=await toWav(aBuf);
+    const{text,segments,language}=await transcribeWhisper(wavBlob);
+
+    const prev=text.length>60?text.slice(0,60)+' …':text||'(kein Text erkannt)';
+    setMsg('Analyse läuft …','„'+prev+'"');
 
     const waveform           = makeWaveform(raw,900);
     const{pitches:raw_p,times}= pitchContour(raw,sr);
