@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stimm-Analyse</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #0c1220; --surface: #162032; --border: #2a3f5a;
+      --accent:  #0ea5a0; --accent2: #38bdf8; --text:   #e8f0fa; --muted: #6b8aaa;
+      --good: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+    }
+    body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+
+    header { background:linear-gradient(160deg,#0c1220,#162032); border-bottom:1px solid var(--border); padding:28px 20px 22px; text-align:center; }
+    .logo-row { display:inline-flex; align-items:center; gap:12px; margin-bottom:6px; }
+    .logo-icon { width:44px; height:44px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:11px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    h1 { font-size:1.7rem; font-weight:700; background:linear-gradient(120deg,#5eead4,var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    header p { color:var(--muted); font-size:.88rem; }
+    main { max-width:900px; margin:0 auto; padding:24px 16px 48px; }
+
+    /* ── Record card ── */
+    .record-card { background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:36px 24px 28px; text-align:center; margin-bottom:16px; }
+    .record-btn { width:92px; height:92px; border-radius:50%; border:3px solid var(--accent); background:transparent; color:var(--text); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; margin-bottom:18px; transition:background .2s,transform .15s; }
+    .record-btn:hover { background:rgba(14,165,160,.1); transform:scale(1.06); }
+    .record-btn svg { width:38px; height:38px; }
+    .record-btn.active { border-color:var(--bad); background:rgba(239,68,68,.1); animation:ripple 1.6s ease-out infinite; }
+    @keyframes ripple { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.45)} 50%{box-shadow:0 0 0 18px rgba(239,68,68,0)} }
+    #statusText { font-size:1rem; font-weight:600; margin-bottom:6px; }
+    #timerText  { font-size:2.2rem; font-weight:700; font-variant-numeric:tabular-nums; color:#5eead4; display:none; margin-bottom:4px; }
+    #hintText   { color:var(--muted); font-size:.83rem; }
+    #liveCanvas { width:100%; height:72px; display:block; background:var(--surface); border:1px solid var(--border); border-radius:10px; margin-bottom:12px; }
+
+    /* ── Analyzing ── */
+    #analyzingState { display:none; text-align:center; padding:56px 20px; }
+    .spinner { width:52px; height:52px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 18px; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    #analyzingMsg    { font-size:.97rem; font-weight:600; margin-bottom:6px; }
+    #analyzingSubMsg { font-size:.82rem; color:var(--muted); max-width:400px; margin:0 auto; }
+
+    /* ── Results ── */
+    #resultsSection { display:none; }
+    .results-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
+    .results-header h2 { font-size:1.15rem; font-weight:700; }
+    .btn-ghost { background:transparent; border:1px solid var(--border); color:var(--text); padding:7px 16px; border-radius:8px; cursor:pointer; font-size:.83rem; transition:border-color .2s,color .2s; }
+    .btn-ghost:hover { border-color:var(--accent); color:#5eead4; }
+
+    /* ── Metrics grid (6 cards, 4 columns on ≥560px) ── */
+    .metrics-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:14px; }
+    @media(min-width:560px){ .metrics-grid{grid-template-columns:repeat(4,1fr);} }
+    .metric-card { background:var(--surface); border:1px solid var(--border); border-radius:13px; padding:14px 10px; text-align:center; }
+    .metric-card.wide { grid-column:span 2; }
+    .metric-card.wide .metric-sub { white-space:normal; line-height:1.6; }
+    .metric-card.good { border-color:rgba(34,197,94,.4); }
+    .metric-card.warn { border-color:rgba(245,158,11,.4); }
+    .metric-card.bad  { border-color:rgba(239,68,68,.4); }
+    .metric-icon  { font-size:1.25rem; margin-bottom:6px; }
+    .metric-label { font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px; }
+    .metric-value { font-size:1rem; font-weight:700; }
+    .metric-card.good .metric-value { color:var(--good); }
+    .metric-card.warn .metric-value { color:var(--warn); }
+    .metric-card.bad  .metric-value { color:var(--bad); }
+    .metric-sub { font-size:.7rem; color:var(--muted); margin-top:2px; }
+
+    /* ── Detail card ── */
+    .detail-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 20px; margin-bottom:14px; }
+    .detail-card h3 { font-size:.85rem; font-weight:700; margin-bottom:12px; }
+    .detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:8px; }
+    .di { display:flex; flex-direction:column; gap:3px; background:var(--bg); border-radius:9px; padding:10px 12px; }
+    .di-label { font-size:.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+    .di-val   { font-size:.88rem; font-weight:600; }
+    .di-good  { color:var(--good); } .di-warn{color:var(--warn);} .di-bad{color:var(--bad);} .di-neu{color:var(--accent2);}
+
+    /* ── Viz ── */
+    .viz-grid { display:grid; grid-template-columns:1fr; gap:14px; margin-bottom:14px; }
+    @media(min-width:560px){ .viz-grid{grid-template-columns:1fr 1fr;} }
+    .viz-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:16px; }
+    .viz-card h3 { font-size:.73rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; }
+    .viz-card canvas { width:100%; height:130px; display:block; border-radius:6px; }
+    .viz-legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; font-size:.72rem; color:var(--muted); }
+    .ld { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+
+    /* ── Feedback ── */
+    .feedback-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:14px; }
+    .feedback-card > h3 { font-size:.95rem; font-weight:700; margin-bottom:14px; }
+    .fg-title { font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; margin-top:14px; }
+    .fg-title:first-of-type { margin-top:0; }
+    .fi { display:flex; gap:10px; padding:10px 13px; border-radius:9px; margin-bottom:7px; font-size:.86rem; line-height:1.55; }
+    .fi span:first-child { flex-shrink:0; margin-top:1px; font-weight:700; }
+    .fi.positive    { background:rgba(34,197,94,.07);  border:1px solid rgba(34,197,94,.2); }
+    .fi.improvement { background:rgba(245,158,11,.07); border:1px solid rgba(245,158,11,.2); }
+    .fi.critical    { background:rgba(239,68,68,.07);  border:1px solid rgba(239,68,68,.2); }
+    .fi.positive    span:first-child { color:var(--good); }
+    .fi.improvement span:first-child { color:var(--warn); }
+    .fi.critical    span:first-child { color:var(--bad); }
+
+    /* ── Transcript ── */
+    .transcript-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:20px; }
+    .transcript-card h3 { font-size:.95rem; font-weight:700; margin-bottom:12px; }
+    #transcriptFinal { font-size:.87rem; line-height:1.8; }
+    .filler-hl { background:rgba(239,68,68,.18); color:#fca5a5; border-radius:3px; padding:0 3px; font-weight:700; }
+    .no-text { color:var(--muted); font-style:italic; font-size:.87rem; }
+
+    /* ── Onboarding ── */
+    .onboarding-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:32px 24px;margin-bottom:16px;}
+    .onboarding-card>h2{font-size:1.15rem;font-weight:700;margin-bottom:6px;}
+    .onboarding-card>p{color:var(--muted);font-size:.85rem;margin-bottom:26px;}
+    .ob-step{margin-bottom:22px;}
+    .ob-label{font-size:.73rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:9px;}
+    .ob-options{display:flex;gap:8px;flex-wrap:wrap;}
+    .ob-options-2col{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+    .ob-btn{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer;font-size:.88rem;transition:border-color .18s,background .18s;text-align:left;width:100%;}
+    .ob-btn:hover{border-color:var(--accent2);}
+    .ob-btn.selected{border-color:var(--accent);background:rgba(14,165,160,.13);color:#5eead4;font-weight:600;}
+    .btn-start{width:100%;padding:14px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:12px;color:white;font-size:1rem;font-weight:700;cursor:pointer;margin-top:4px;transition:opacity .2s;}
+    .btn-start:disabled{opacity:.3;cursor:not-allowed;}
+    .btn-start:not(:disabled):hover{opacity:.85;}
+    .profile-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(14,165,160,.1);border:1px solid rgba(14,165,160,.25);border-radius:20px;padding:4px 12px;font-size:.75rem;color:#5eead4;margin-bottom:14px;cursor:pointer;}
+    .profile-badge:hover{background:rgba(14,165,160,.18);}
+
+    /* ── Gesamteindruck ── */
+    .eindruck-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:14px;}
+    .eindruck-card>h3{font-size:.95rem;font-weight:700;margin-bottom:4px;}
+    .eindruck-card>.ei-intro{font-size:.78rem;color:var(--muted);margin-bottom:14px;}
+    .ei-row{padding:12px 0;border-top:1px solid rgba(42,63,90,.6);}
+    .ei-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;}
+    .ei-label{font-size:.88rem;font-weight:700;}
+    .ei-badge{font-size:.72rem;font-weight:700;padding:2px 9px;border-radius:20px;letter-spacing:.03em;}
+    .ei-badge.good{background:rgba(34,197,94,.15);color:var(--good);}
+    .ei-badge.warn{background:rgba(245,158,11,.15);color:var(--warn);}
+    .ei-badge.bad{background:rgba(239,68,68,.15);color:var(--bad);}
+    .ei-bar-wrap{height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:8px;}
+    .ei-bar-fill{height:100%;border-radius:3px;transition:width .7s cubic-bezier(.4,0,.2,1);}
+    .ei-text{font-size:.81rem;color:var(--muted);line-height:1.6;}
+  </style>
+</head>
+<body>
+<header>
+  <div class="logo-row">
+    <div class="logo-icon">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+        <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+    </div>
+    <h1>Stimm-Analyse</h1>
+  </div>
+  <p>Nimm dich auf und erhalte sofortiges Feedback zu deiner Sprechweise</p>
+</header>
+
+<main>
+  <!-- Onboarding -->
+  <div id="onboardingSection">
+    <div class="onboarding-card">
+      <h2>Einrichtung</h2>
+      <p>3 kurze Angaben – damit die Bewertung wirklich zu dir passt.</p>
+
+      <div class="ob-step" id="obStep1">
+        <div class="ob-label">Geschlecht</div>
+        <div class="ob-options">
+          <button class="ob-btn" onclick="selectOb('gender','frau',this)">Frau</button>
+          <button class="ob-btn" onclick="selectOb('gender','mann',this)">Mann</button>
+          <button class="ob-btn" onclick="selectOb('gender','keine_angabe',this)">Keine Angabe</button>
+        </div>
+      </div>
+
+      <div class="ob-step" id="obStep2">
+        <div class="ob-label">Altersgruppe</div>
+        <div class="ob-options">
+          <button class="ob-btn" onclick="selectOb('age','u30',this)">Unter 30</button>
+          <button class="ob-btn" onclick="selectOb('age','30-50',this)">30 – 50</button>
+          <button class="ob-btn" onclick="selectOb('age','ue50',this)">Über 50</button>
+        </div>
+      </div>
+
+      <div class="ob-step" id="obStep3">
+        <div class="ob-label">Wofür möchtest du deine Stimme verbessern?</div>
+        <div class="ob-options-2col">
+          <button class="ob-btn" onclick="selectOb('purpose','praesentation',this)">Präsentation / Vortrag</button>
+          <button class="ob-btn" onclick="selectOb('purpose','podcast',this)">Podcast / Video</button>
+          <button class="ob-btn" onclick="selectOb('purpose','alltag',this)">Alltag / Gespräche</button>
+          <button class="ob-btn" onclick="selectOb('purpose','buehne',this)">Bühne / Schauspiel</button>
+        </div>
+      </div>
+
+      <button class="btn-start" id="startBtn" onclick="finishOnboarding()" disabled>Weiter zur Aufnahme →</button>
+    </div>
+  </div>
+
+  <!-- Recording -->
+  <div id="recordSection" style="display:none">
+    <div id="profileBadge" class="profile-badge" onclick="resetOnboarding()" title="Angaben ändern"></div>
+    <div class="record-card">
+      <button class="record-btn" id="recordBtn" onclick="toggleRecording()">
+        <svg id="iconMic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        <svg id="iconStop" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+      </button>
+      <div id="statusText">Aufnahme starten</div>
+      <div id="timerText">0:00</div>
+      <div id="hintText">Sprich mindestens 30 Sekunden für eine aussagekräftige Analyse</div>
+    </div>
+    <canvas id="liveCanvas" height="72"></canvas>
+  </div>
+
+  <!-- Analyzing -->
+  <div id="analyzingState">
+    <div class="spinner"></div>
+    <div id="analyzingMsg">Wird transkribiert …</div>
+    <div id="analyzingSubMsg">Audio wird an OpenAI Whisper übertragen</div>
+  </div>
+
+  <!-- Results -->
+  <div id="resultsSection">
+    <div class="results-header">
+      <h2>Deine Auswertung</h2>
+      <button class="btn-ghost" onclick="resetApp()">Neue Aufnahme</button>
+    </div>
+
+    <div class="metrics-grid" id="metricsGrid"></div>
+    <div class="eindruck-card" id="eindruckCard"></div>
+    <div class="detail-card" id="detailCard"></div>
+
+    <div class="viz-grid">
+      <div class="viz-card">
+        <h3>Wellenform</h3>
+        <canvas id="waveCanvas" height="130"></canvas>
+        <div class="viz-legend">
+          <span><span class="ld" style="background:#0ea5a0"></span>Lautstärke</span>
+          <span><span class="ld" style="background:rgba(239,68,68,.5)"></span>Pausen</span>
+        </div>
+      </div>
+      <div class="viz-card">
+        <h3>Tonhöhenverlauf</h3>
+        <canvas id="pitchCanvas" height="130"></canvas>
+        <div class="viz-legend">
+          <span><span class="ld" style="background:#f59e0b"></span>Grundfrequenz (Hz)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feedback-card" id="feedbackCard"></div>
+
+    <div class="transcript-card">
+      <h3>Erkannter Text <small id="fillerLegend" style="font-weight:400;color:var(--muted);font-size:.78rem"></small></h3>
+      <div id="transcriptFinal"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ═══════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════
+let mediaRec=null,audioChunks=[],liveCtx=null,analyserNode=null,liveSource=null;
+let animId=null,recording=false,recStart=0,recDuration=0,timerIv=null;
+let userProfile={gender:null,age:null,purpose:null};
+
+// ═══════════════════════════════════════════
+//  ONBOARDING
+// ═══════════════════════════════════════════
+function selectOb(key,val,btn){
+  userProfile[key]=val;
+  btn.closest('.ob-step').querySelectorAll('.ob-btn').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');
+  if(userProfile.gender&&userProfile.age&&userProfile.purpose)
+    document.getElementById('startBtn').disabled=false;
+}
+
+const GENDER_LABELS={frau:'Frau',mann:'Mann',keine_angabe:'Keine Angabe'};
+const AGE_LABELS={u30:'Unter 30',  '30-50':'30–50',ue50:'Über 50'};
+const PURPOSE_LABELS={praesentation:'Präsentation',podcast:'Podcast/Video',alltag:'Alltag',buehne:'Bühne'};
+
+function finishOnboarding(){
+  const{gender,age,purpose}=userProfile;
+  const badge=document.getElementById('profileBadge');
+  badge.textContent=`${GENDER_LABELS[gender]} · ${AGE_LABELS[age]} · ${PURPOSE_LABELS[purpose]}  ✎`;
+  document.getElementById('onboardingSection').style.display='none';
+  document.getElementById('recordSection').style.display='block';
+}
+
+function resetOnboarding(){
+  if(recording)return;
+  document.getElementById('recordSection').style.display='none';
+  document.getElementById('onboardingSection').style.display='block';
+}
+
+// ═══════════════════════════════════════════
+//  RECORDING
+// ═══════════════════════════════════════════
+async function toggleRecording(){if(!recording)await startRec();else stopRec();}
+
+async function startRec(){
+  let stream;
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});}
+  catch(e){alert('Mikrofon-Zugriff nicht möglich: '+e.message);return;}
+
+  liveCtx=new AudioContext();
+  analyserNode=liveCtx.createAnalyser(); analyserNode.fftSize=1024;
+  liveSource=liveCtx.createMediaStreamSource(stream);
+  liveSource.connect(analyserNode);
+
+  const mime=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+  mediaRec=new MediaRecorder(stream,mime?{mimeType:mime}:{});
+  audioChunks=[];
+  mediaRec.ondataavailable=e=>{if(e.data.size>0)audioChunks.push(e.data);};
+  mediaRec.onstop=async()=>{stream.getTracks().forEach(t=>t.stop());try{liveCtx.close();}catch(e){}await doAnalysis();};
+  mediaRec.start(200);
+  recStart=Date.now(); recording=true;
+
+  document.getElementById('recordBtn').classList.add('active');
+  document.getElementById('iconMic').style.display='none';
+  document.getElementById('iconStop').style.display='block';
+  document.getElementById('statusText').textContent='Aufnahme läuft …';
+  document.getElementById('timerText').style.display='block';
+  document.getElementById('hintText').textContent='Klicke erneut zum Beenden';
+  drawLive();
+  timerIv=setInterval(()=>{
+    const s=Math.floor((Date.now()-recStart)/1000);
+    document.getElementById('timerText').textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  },250);
+}
+
+function stopRec(){
+  recording=false; recDuration=(Date.now()-recStart)/1000;
+  cancelAnimationFrame(animId); clearInterval(timerIv);
+  if(mediaRec&&mediaRec.state!=='inactive')mediaRec.stop();
+  document.getElementById('recordSection').style.display='none';
+  document.getElementById('analyzingState').style.display='block';
+  setMsg('Wird transkribiert …','Audio wird an OpenAI Whisper übertragen …');
+}
+
+function drawLive(){
+  const cv=document.getElementById('liveCanvas');
+  cv.width=cv.clientWidth*devicePixelRatio; cv.height=72*devicePixelRatio;
+  const ctx=cv.getContext('2d'),buf=new Float32Array(analyserNode.frequencyBinCount);
+  function frame(){
+    if(!recording)return; animId=requestAnimationFrame(frame);
+    analyserNode.getFloatTimeDomainData(buf);
+    const W=cv.width,H=cv.height;
+    ctx.fillStyle='#162032'; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='#0ea5a0'; ctx.lineWidth=1.5*devicePixelRatio; ctx.beginPath();
+    const step=W/buf.length;
+    for(let i=0;i<buf.length;i++){const x=i*step,y=H/2+buf[i]*H*0.42;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+    ctx.stroke();
+  }
+  frame();
+}
+
+function setMsg(m,s){
+  document.getElementById('analyzingMsg').textContent=m;
+  document.getElementById('analyzingSubMsg').textContent=s;
+}
+
+// ═══════════════════════════════════════════
+//  WAV CONVERSION  (browser-side, 16 kHz mono)
+// ═══════════════════════════════════════════
+async function toWav(audioBuf){
+  const targetSR=16000;
+  const offCtx=new OfflineAudioContext(1,Math.ceil(audioBuf.duration*targetSR),targetSR);
+  const src=offCtx.createBufferSource();
+  src.buffer=audioBuf;
+  src.connect(offCtx.destination);
+  src.start(0);
+  const resampled=await offCtx.startRendering();
+  const samples=resampled.getChannelData(0);
+
+  const buf=new ArrayBuffer(44+samples.length*2);
+  const v=new DataView(buf);
+  const ws=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  ws(0,'RIFF'); v.setUint32(4,36+samples.length*2,true);
+  ws(8,'WAVE'); ws(12,'fmt ');
+  v.setUint32(16,16,true);  v.setUint16(20,1,true);
+  v.setUint16(22,1,true);   v.setUint32(24,targetSR,true);
+  v.setUint32(28,targetSR*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+  ws(36,'data'); v.setUint32(40,samples.length*2,true);
+  let off=44;
+  for(let i=0;i<samples.length;i++){
+    const s=Math.max(-1,Math.min(1,samples[i]));
+    v.setInt16(off,s<0?s*0x8000:s*0x7FFF,true); off+=2;
+  }
+  return new Blob([buf],{type:'audio/wav'});
+}
+
+// ═══════════════════════════════════════════
+//  WHISPER  (proxied through backend)
+// ═══════════════════════════════════════════
+async function transcribeWhisper(blob){
+  const ext=blob.type.includes('wav')?'wav':blob.type.includes('mp4')?'mp4':blob.type.includes('ogg')?'ogg':'webm';
+  const form=new FormData();
+  form.append('file',blob,'recording.'+ext);
+
+  const ctrl=new AbortController();
+  const tid=setTimeout(()=>{console.log('[debug] AbortController fired after 25s');ctrl.abort();},25000); // 25 s client-side guard
+  let res;
+  console.log('[debug] fetch /transcribe START',new Date().toISOString(),'| blob size:',(blob.size/1024).toFixed(1)+'KB','| type:',blob.type);
+  try{
+    res=await fetch('/transcribe',{method:'POST',body:form,signal:ctrl.signal});
+    console.log('[debug] fetch /transcribe RESPONSE',res.status,new Date().toISOString());
+  }catch(e){
+    clearTimeout(tid);
+    if(e.name==='AbortError'){
+      console.log('[debug] fetch ABORTED (AbortError)');
+      throw new Error('Transkription dauerte zu lange. Bitte kürzer aufnehmen (max. 1–2 Minuten).');
+    }
+    console.log('[debug] fetch ERROR:',e.name,e.message);
+    throw e;
+  }
+  clearTimeout(tid);
+
+  if(!res.ok){
+    let msg='HTTP '+res.status;
+    try{const j=await res.json();msg=j.error||msg;}catch(e){}
+    throw new Error(msg);
+  }
+  const d=await res.json();
+  return{text:(d.text||'').trim(), segments:d.segments||[], language:d.language||'german'};
+}
+
+// ═══════════════════════════════════════════
+//  AUDIO ANALYSIS FUNCTIONS
+// ═══════════════════════════════════════════
+
+// ── Waveform ──────────────────────────────
+function makeWaveform(s,n){
+  const block=Math.floor(s.length/n),out=new Float32Array(n);
+  for(let i=0;i<n;i++){let pk=0;for(let j=0;j<block;j++){const v=Math.abs(s[i*block+j]||0);if(v>pk)pk=v;}out[i]=pk;}
+  return out;
+}
+
+// ── Pitch (raw) ───────────────────────────
+function pitchContour(s,sr){
+  const hop=Math.floor(sr*0.08),frame=1024,pitches=[],times=[];
+  for(let start=0;start+frame<=s.length;start+=hop){
+    pitches.push(getPitch(s.slice(start,start+frame),sr));
+    times.push(start/sr);
+  }
+  return{pitches,times};
+}
+function getPitch(buf,sr){
+  const n=buf.length,minL=Math.floor(sr/500),maxL=Math.min(Math.floor(sr/60),Math.floor(n*.75));
+  let energy=0; for(let i=0;i<n;i++)energy+=buf[i]*buf[i];
+  if(energy/n<0.0004)return 0;
+  let bestC=-1,bestL=-1;
+  for(let lag=minL;lag<=maxL;lag++){let c=0;for(let i=0;i<n-lag;i++)c+=buf[i]*buf[i+lag];if(c>bestC){bestC=c;bestL=lag;}}
+  if(bestL===-1)return 0;
+  if(bestC/((energy/n)*(n-bestL))<0.33)return 0;
+  return sr/bestL;
+}
+
+// ── Octave-error correction ───────────────
+function smoothPitches(pitches){
+  const voiced=pitches.filter(p=>p>0);
+  if(voiced.length<3)return pitches;
+  const sorted=[...voiced].sort((a,b)=>a-b);
+  const median=sorted[Math.floor(sorted.length/2)];
+  return pitches.map(p=>{
+    if(p===0)return 0;
+    if(p>median*2.2)return p/2;   // halve upward octave errors
+    if(p<median*0.45)return p*2;  // double downward octave errors
+    return p;
+  });
+}
+
+// ── Pitch statistics (strict thresholds) ─
+function calcPitchStats(pitches){
+  const voiced=pitches.filter(p=>p>60&&p<520);
+  if(voiced.length<6)return null;
+  const mean=voiced.reduce((a,b)=>a+b,0)/voiced.length;
+  const stVar=voiced.reduce((a,f)=>{const st=12*Math.log2(f/mean);return a+st*st;},0)/voiced.length;
+  return{mean:Math.round(mean),stRMS:Math.sqrt(stVar),n:voiced.length};
+}
+
+// ── Loudness dynamics ─────────────────────
+function calcLoudness(s,sr){
+  const chunk=Math.floor(sr*.1),chunks=[];
+  for(let i=0;i+chunk<=s.length;i+=chunk){
+    let rms=0; for(let j=0;j<chunk;j++)rms+=s[i+j]**2;
+    rms=Math.sqrt(rms/chunk); if(rms>0.006)chunks.push(rms);
+  }
+  if(chunks.length<5)return null;
+  const mean=chunks.reduce((a,b)=>a+b,0)/chunks.length;
+  const variance=chunks.reduce((a,v)=>a+(v-mean)**2,0)/chunks.length;
+  return{mean,cv:Math.sqrt(variance)/mean,n:chunks.length};
+}
+
+// ── Voice quality (autocorr peak ratio) ──
+function calcVoiceQuality(s,sr,pitches){
+  const hop=Math.floor(sr*.08),frame=1024,peaks=[];
+  pitches.forEach((f0,i)=>{
+    if(f0<60||f0>520)return;
+    const start=i*hop; if(start+frame>s.length)return;
+    const lag=Math.round(sr/f0); if(lag<1||lag>=frame/2)return;
+    let corr=0,energy=0;
+    for(let j=0;j<frame-lag;j++){corr+=s[start+j]*s[start+j+lag];energy+=s[start+j]**2;}
+    if(energy>0)peaks.push((corr/energy)*(frame/(frame-lag)));
+  });
+  if(peaks.length<5)return null;
+  return peaks.reduce((a,b)=>a+b,0)/peaks.length; // 0-1
+}
+
+// ── Pauses ────────────────────────────────
+function findPauses(s,sr){
+  const chunk=Math.floor(sr*.04),thr=0.02,minD=0.25,res=[];
+  let inP=false,pStart=0;
+  for(let i=0;i+chunk<=s.length;i+=chunk){
+    let rms=0; for(let j=0;j<chunk;j++)rms+=s[i+j]**2; rms=Math.sqrt(rms/chunk);
+    const t=i/sr;
+    if(rms<thr&&!inP){inP=true;pStart=t;}
+    else if(rms>=thr&&inP){inP=false;const d=t-pStart;if(d>=minD)res.push({s:pStart,e:t,d});}
+  }
+  if(inP){const d=s.length/sr-pStart;if(d>=minD)res.push({s:pStart,e:s.length/sr,d});}
+  return res;
+}
+
+// ── Breath detection ──────────────────────
+function detectBreaths(s,sr){
+  const chunkMs=20,chunk=Math.floor(sr*chunkMs/1000);
+  const minC=Math.ceil(60/chunkMs),maxC=Math.floor(400/chunkMs);
+  const lo=0.003,hi=0.04,events=[];
+  let inB=false,bStart=0,bC=0;
+  for(let i=0;i+chunk<=s.length;i+=chunk){
+    let rms=0; for(let j=0;j<chunk;j++)rms+=s[i+j]**2; rms=Math.sqrt(rms/chunk);
+    const t=i/sr,ok=rms>=lo&&rms<=hi;
+    if(ok&&!inB){inB=true;bStart=t;bC=1;}
+    else if(ok&&inB)bC++;
+    else if(!ok&&inB){inB=false;if(bC>=minC&&bC<=maxC)events.push({t:bStart,d:bC*chunkMs/1000});}
+  }
+  return events;
+}
+
+// ── Emphasis detection ────────────────────
+function calcEmphases(pitches,times,s,sr){
+  const hop=Math.floor(sr*.08),csz=hop;
+  const loud=pitches.map((_,i)=>{
+    const st=i*hop; if(st+csz>s.length)return 0;
+    let rms=0; for(let j=0;j<csz;j++)rms+=s[st+j]**2; return Math.sqrt(rms/csz);
+  });
+  const voiced=[];
+  pitches.forEach((p,i)=>{if(p>60&&p<520)voiced.push({p,l:loud[i],t:times[i]});});
+  if(voiced.length<5)return{count:0,perMin:0};
+  const pMean=voiced.reduce((a,x)=>a+x.p,0)/voiced.length;
+  const lMean=voiced.reduce((a,x)=>a+x.l,0)/voiced.length;
+  let count=0,lastT=-1;
+  voiced.forEach(x=>{if(x.p>=pMean*1.2&&x.l>=lMean*1.25&&x.t-lastT>0.5){count++;lastT=x.t;}});
+  const dur=times[times.length-1]||1;
+  return{count,perMin:(count/dur)*60};
+}
+
+// ── Liveliness score 0-100 (pitch + loudness + emphasis) ──
+function calcLiveliness(stRMS,cv,emphPerMin){
+  const pS=Math.min(100,(stRMS/10.0)*100);
+  const lS=Math.min(100,(cv/0.60)*100);
+  const eS=Math.min(100,(emphPerMin/10)*100);
+  let score=Math.round(pS*.50+lS*.35+eS*.15);
+  if(stRMS<1.5)score=Math.min(score,20);
+  else if(stRMS<3.0)score=Math.min(score,40);
+  else if(stRMS<5.0&&cv<0.25)score=Math.min(score,52);
+  return score;
+}
+
+// ── Enthusiasm: pitch level + variation + loudness ──
+function calcEnthusiasm(pitchMean,stRMS,cv,emphPerMin){
+  const fS=Math.min(1,Math.max(0,(pitchMean-80)/220));
+  const vS=Math.min(1,stRMS/5);
+  const dS=Math.min(1,cv/0.4);
+  const eS=Math.min(1,emphPerMin/5);
+  return Math.round((fS*.15+vS*.40+dS*.30+eS*.15)*100);
+}
+
+// ── Comprehensibility from Whisper verbose_json ──
+function calcClarity(segments){
+  if(!segments?.length)return null;
+  const valid=segments.filter(s=>s.avg_logprob!=null&&(s.no_speech_prob||0)<0.5);
+  if(!valid.length)return null;
+  const avg=valid.reduce((a,s)=>a+s.avg_logprob,0)/valid.length;
+  return Math.round(Math.max(0,Math.min(100,(1+avg)*100)));
+}
+
+// ── Pitch register (Grundtonlage) – geschlechtsspezifisch ──
+function calcPitchRegister(mean){
+  if(!mean||mean<=0)return null;
+  const hz=Math.round(mean)+' Hz';
+  const g=userProfile.gender;
+  if(g==='mann'){
+    if(mean<75)  return{label:'Sehr tief',sub:hz+' – sehr tiefer Bass',cls:'di-neu'};
+    if(mean<110) return{label:'Tief',sub:hz+' – tiefe Männerstimme',cls:'di-good'};
+    if(mean<145) return{label:'Mittel',sub:hz+' – mittlere Männerstimme',cls:'di-good'};
+    if(mean<185) return{label:'Hoch / hell',sub:hz+' – helle Männerstimme',cls:'di-warn'};
+    return{label:'Sehr hoch',sub:hz+' – ungewöhnlich hoch für Mann',cls:'di-bad'};
+  }
+  // frau oder keine_angabe: weibliche Normen
+  if(mean<120) return{label:'Sehr tief',sub:hz+' – ungewöhnlich tief',cls:'di-neu'};
+  if(mean<165) return{label:'Tief',sub:hz+' – tiefe Frauenstimme',cls:'di-good'};
+  if(mean<210) return{label:'Mittel',sub:hz+' – mittlere Frauenstimme',cls:'di-good'};
+  if(mean<255) return{label:'Hoch',sub:hz+' – hohe Frauenstimme',cls:'di-warn'};
+  return{label:'Sehr hoch / schrill',sub:hz,cls:'di-bad'};
+}
+
+// ── Tempo-Normen nach Zweck und Alter ──────
+function getTempoRange(){
+  const base={
+    praesentation:[100,140],
+    podcast:      [120,158],
+    alltag:       [130,175],
+    buehne:       [85, 135],
+  }[userProfile.purpose]||[110,155];
+  if(userProfile.age==='u30')  return[base[0],      base[1]+12];
+  if(userProfile.age==='ue50') return[base[0]-10,   base[1]-8];
+  return base;
+}
+
+// ── Dialect detection ─────────────────────
+function detectDialect(text){
+  if(!text)return'Standarddeutsch';
+  const lo=text.toLowerCase();
+  const map={
+    'Österreichisch':['jänner','feber','erdäpfel','paradeiser','marille','pfiat','servus'],
+    'Schweizerdeutsch':['grüezi','velo','natel','trottoir','merci vielmal','billett'],
+    'Bairisch':['ned ','scho ','oida','mia san','gell ',' hoid'],
+    'Norddeutsch':['moin','schnack',"'ne "]
+  };
+  for(const[d,ws]of Object.entries(map)){if(ws.some(w=>lo.includes(w)))return d;}
+  return'Standarddeutsch';
+}
+
+// ── Fillers ───────────────────────────────
+const FILLERS=['ähm','öhm','ehm','äh','uhm','hmm','hm','mhm','mmh','mmhm','also','halt','quasi','sozusagen','irgendwie','irgendwas','eigentlich','gewissermaßen'];
+function findFillers(text){
+  if(!text)return{};
+  const words=text.toLowerCase().split(/[\s.,!?;:'"()\-–—]+/).filter(Boolean);
+  const out={};
+  FILLERS.forEach(f=>{const c=words.filter(w=>w===f).length;if(c>0)out[f]=c;});
+  return out;
+}
+function fillerTotal(fw){return Object.values(fw).reduce((a,b)=>a+b,0);}
+function fillerCompact(fw){
+  return Object.entries(fw).sort((a,b)=>b[1]-a[1])
+    .map(([w,c])=>`${w} (${c}×)`).join(' · ');
+}
+
+// ── Audio-based filler sound detection ───
+// Finds short voiced events (100-450ms, with pitch) in gaps between Whisper segments.
+// Whisper silently drops ähm/äh/hmm – those show up as gaps in the transcript timeline.
+function detectFillerSounds(samples, sr, segments, dur){
+  // Build gaps: intervals where Whisper found no speech
+  const segs=[...(segments||[])].sort((a,b)=>a.start-b.start);
+  const gaps=[];
+  if(!segs.length){
+    gaps.push({s:0,e:dur});
+  } else {
+    if(segs[0].start>0.25) gaps.push({s:0,e:segs[0].start});
+    for(let i=0;i<segs.length-1;i++){
+      const gStart=segs[i].end, gEnd=segs[i+1].start;
+      if(gEnd-gStart>0.05) gaps.push({s:gStart,e:gEnd});
+    }
+    if(dur-segs[segs.length-1].end>0.25)
+      gaps.push({s:segs[segs.length-1].end,e:dur});
+  }
+
+  const chunkMs=20, chunk=Math.floor(sr*chunkMs/1000);
+  const minC=Math.ceil(80/chunkMs);    // 80ms minimum
+  const maxC=Math.floor(600/chunkMs);  // 600ms maximum
+  const voiceThr=0.010;                // lowered: catches quieter fillers
+  let count=0;
+
+  gaps.forEach(g=>{
+    const s0=Math.floor(g.s*sr);
+    const s1=Math.min(Math.floor(g.e*sr), samples.length);
+    const seg=samples.subarray(s0,s1);
+
+    // RMS per 20ms chunk
+    const rmsList=[];
+    for(let i=0;i+chunk<=seg.length;i+=chunk){
+      let r=0; for(let j=0;j<chunk;j++) r+=seg[i+j]**2;
+      rmsList.push(Math.sqrt(r/chunk));
+    }
+
+    // Find voiced runs within filler duration range
+    let inV=false, vStart=0, vCount=0;
+    const flush=()=>{
+      if(vCount>=minC && vCount<=maxC){
+        // Verify with pitch: take 1024-sample window from middle of segment
+        const mid=s0+(vStart+Math.floor(vCount/2))*chunk;
+        const win=samples.subarray(mid, Math.min(mid+1024, samples.length));
+        if(win.length>=256){
+          const f0=getPitch(win,sr);
+          if(f0>50 && f0<800) count++;  // voiced – not breath/noise
+        }
+      }
+    };
+    rmsList.forEach((r,i)=>{
+      if(r>=voiceThr){
+        if(!inV){inV=true;vStart=i;vCount=1;}else vCount++;
+      } else {
+        if(inV){flush();inV=false;vCount=0;}
+      }
+    });
+    if(inV)flush();
+  });
+
+  return count;
+}
+
+// ── Count every standalone "und" in text ──
+function countUnd(text){
+  if(!text)return 0;
+  return((text.match(/\bund\b/gi))||[]).length;
+}
+
+// ── Conjunction-as-pause detection ────────
+function detectConjunctions(text){
+  if(!text||!text.trim())return 0;
+  const chunks=text.toLowerCase().split(/[,\.!?]\s+/);
+  const re=/^(und|oder|dann|weil|also|aber|denn|damit)\b/;
+  return chunks.filter(c=>re.test(c.trim())).length;
+}
+
+// ── Sprachstruktur (Satzlänge + Verbindungswörter) ──
+function analyzeSprachstruktur(text){
+  if(!text?.trim())return null;
+  const sents=text.split(/[\.!?]+\s+/).map(s=>s.trim()).filter(s=>s.split(/\s+/).length>2);
+  if(sents.length<2)return null;
+  const wc=sents.map(s=>s.split(/\s+/).filter(Boolean).length);
+  const avgWords=wc.reduce((a,b)=>a+b,0)/wc.length;
+  const connRe=/^(und|wenn|dann|also|weil|aber|oder|damit|denn)\b/i;
+  const connCount=sents.filter(s=>connRe.test(s)).length;
+  const connRatio=connCount/sents.length;
+  const undCount=sents.filter(s=>/^\s*und\b/i.test(s)).length;
+  const shortCount=wc.filter(w=>w<7).length;
+  const longCount=wc.filter(w=>w>20).length;
+  return{sents:sents.length,avgWords,connCount,connRatio,undCount,shortCount,longCount};
+}
+function sprachstrukturRating(d,undTotal){
+  if(!d)return{label:'n/v',status:'warn',sub:'Zu wenig Text'};
+  const{avgWords,connRatio,connCount,sents}=d;
+  let label,status;
+  if(connRatio>0.45){label='Viele Füllverbindungen';status='warn';}
+  else if(avgWords>20||(connRatio>0.35&&avgWords>15)){label='Umständlich';status='bad';}
+  else if(avgWords<=10&&connRatio<=0.2){label='Direkt & klar';status='good';}
+  else{label='Gut strukturiert';status='good';}
+  const undPart=undTotal>0?` · ${undTotal}× „und"`:'';
+  const sub=`ø ${Math.round(avgWords)} Wörter/Satz · ${connCount}× Konjunktion${undPart}`;
+  return{label,status,sub};
+}
+
+// ── Tempo ─────────────────────────────────
+function analyzeText(text,dur){
+  if(!text?.trim())return null;
+  const words=text.trim().split(/\s+/).filter(Boolean);
+  return{wc:words.length,wpm:(words.length/dur)*60};
+}
+
+// ── Sentence-end intonation ───────────────
+// Checks whether the pitch rises in the last 800ms of each Whisper segment.
+// >50% rising ends = question-like pattern.
+function detectSentenceEndIntonation(pitches,times,segments){
+  if(!segments||segments.length<2)return null;
+  let risingCount=0,totalChecked=0;
+  segments.forEach(seg=>{
+    if((seg.end-seg.start)<0.8)return;
+    const winStart=seg.end-0.8,winMid=seg.end-0.4;
+    const first=[],second=[];
+    pitches.forEach((f0,i)=>{
+      if(f0<60||f0>600)return;
+      const t=times[i];
+      if(t>=winStart&&t<winMid)first.push(f0);
+      else if(t>=winMid&&t<seg.end)second.push(f0);
+    });
+    if(first.length<2||second.length<2)return;
+    const fMean=first.reduce((a,b)=>a+b,0)/first.length;
+    const sMean=second.reduce((a,b)=>a+b,0)/second.length;
+    totalChecked++;
+    if(sMean>fMean*1.05)risingCount++;
+  });
+  if(totalChecked<2)return null;
+  return{rising:risingCount,total:totalChecked,ratio:risingCount/totalChecked};
+}
+
+// ═══════════════════════════════════════════
+//  MAIN ANALYSIS
+// ═══════════════════════════════════════════
+async function doAnalysis(){
+  try{
+    const blob=new Blob(audioChunks,{type:audioChunks[0]?.type||'audio/webm'});
+
+    // Decode once — reuse for analysis AND WAV conversion
+    setMsg('Audio wird vorbereitet …','Konvertierung zu WAV …');
+    const ab=await blob.arrayBuffer();
+    const dCtx=new AudioContext();
+    const aBuf=await dCtx.decodeAudioData(ab);
+    const raw=aBuf.getChannelData(0),sr=aBuf.sampleRate;
+    const dur=raw.length/sr;
+    if(dur>1)recDuration=dur;
+
+    setMsg('Wird transkribiert …','Audio wird an OpenAI Whisper übertragen …');
+    const wavBlob=await toWav(aBuf);
+    console.log('[debug] WAV blob size:',(wavBlob.size/1024).toFixed(1)+'KB','| duration:',recDuration.toFixed(1)+'s');
+    const{text,segments,language}=await transcribeWhisper(wavBlob);
+
+    const prev=text.length>60?text.slice(0,60)+' …':text||'(kein Text erkannt)';
+    setMsg('Analyse läuft …','„'+prev+'"');
+
+    const waveform           = makeWaveform(raw,900);
+    const{pitches:raw_p,times}= pitchContour(raw,sr);
+    const pitches            = smoothPitches(raw_p);
+    const pauses             = findPauses(raw,sr);
+    const pitch              = calcPitchStats(pitches);
+    const loudness           = calcLoudness(raw,sr);
+    const voiceQ             = calcVoiceQuality(raw,sr,pitches);
+    const breaths            = detectBreaths(raw,sr);
+    const emphases           = calcEmphases(pitches,times,raw,sr);
+    const clarity            = calcClarity(segments);
+    const tempo              = analyzeText(text,recDuration);
+    const fillers            = findFillers(text);
+    const audioFillers       = detectFillerSounds(raw,sr,segments,dur);
+    const conjunctions       = detectConjunctions(text);
+    const sprachstruktur     = analyzeSprachstruktur(text);
+    const undTotal           = countUnd(text);
+    const dialect            = detectDialect(text);
+    console.log('[debug] fillers text:', fillers, '| audioFillers:', audioFillers, '| undTotal:', undTotal);
+
+    const stRMS   = pitch?.stRMS||0;
+    const cv      = loudness?.cv||0;
+    const liveliness  = calcLiveliness(stRMS,cv,emphases.perMin);
+    const enthusiasm  = pitch ? calcEnthusiasm(pitch.mean,stRMS,cv,emphases.perMin) : null;
+
+    const sentEndIntonation=detectSentenceEndIntonation(pitches,times,segments);
+
+    showResults({waveform,pitches,times,pauses,tempo,fillers,audioFillers,conjunctions,sprachstruktur,undTotal,pitch,loudness,
+      voiceQ,emphases,clarity,dialect,liveliness,enthusiasm,sentEndIntonation,
+      language,dur:recDuration,text,sr});
+
+  }catch(err){
+    console.error(err);
+    // Use setMsg so the DOM structure stays intact (resetApp needs #analyzingMsg to exist)
+    setMsg('Fehler bei der Analyse', err.message);
+    document.getElementById('analyzingSubMsg').insertAdjacentHTML('afterend',
+      `<button class="btn-ghost" onclick="resetApp()" style="margin-top:16px">Neu starten</button>`);
+  }
+}
+
+// ═══════════════════════════════════════════
+//  DISPLAY
+// ═══════════════════════════════════════════
+function showResults(r){
+  document.getElementById('analyzingState').style.display='none';
+  document.getElementById('resultsSection').style.display='block';
+  const fb=buildFeedback(r);
+  renderMetrics(r,fb);
+  renderEindruck(r);
+  renderDetails(r);
+  requestAnimationFrame(()=>{drawWave(r);drawPitch(r);});
+  renderFeedback(fb);
+  renderTranscript(r);
+}
+
+// ── 7 Metric cards ────────────────────────
+function renderMetrics(r,fb){
+  const fcText=fillerTotal(r.fillers);
+  const fcAudio=r.audioFillers||0;
+  const fc=fcText+fcAudio;
+  const fillerRpm=r.dur>0?(fc/(r.dur/60)).toFixed(1):'0.0';
+  const transcriptPart=fillerCompact(r.fillers);
+  const audioPart=fcAudio>0?`+${fcAudio} audio-erkannt`:'';
+  const fillerSub=fc>0?[fillerRpm+'/min',transcriptPart,audioPart].filter(Boolean).join(' · '):'Sehr professionell – keine Fülllaute';
+  const fillerVal=fc>0?fc+' erkannt':'Keine erkannt';
+
+  const strukt=sprachstrukturRating(r.sprachstruktur,r.undTotal||0);
+
+  const cards=[
+    {icon:'⚡',label:'Sprechtempo',      status:fb.s.tempo,
+     val:r.tempo?Math.round(r.tempo.wpm)+' WpM':'n/v',
+     sub:r.tempo?tempoTag(r.tempo.wpm):'Kein Text'},
+    {icon:'💬',label:'Füllwörter',       status:fb.s.filler, wide:true,
+     val:fillerVal, sub:fillerSub},
+    {icon:'✨',label:'Lebendigkeit',     status:fb.s.lively,
+     val:r.liveliness+'/100',sub:livelyTag(r.liveliness)},
+    {icon:'🎵',label:'Stimmmelodie',    status:fb.s.melody,
+     val:r.pitch?'±'+r.pitch.stRMS.toFixed(1)+' st':'n/v',
+     sub:r.pitch?melodyTag(r.pitch.stRMS):'Zu kurz'},
+    {icon:'🔍',label:'Verständlichkeit',status:fb.s.clarity,
+     val:r.clarity!=null?r.clarity+'/100':'n/v',
+     sub:r.clarity!=null?clarityTag(r.clarity):'n/v'},
+    {icon:'💪',label:'Betonungen',      status:fb.s.emphasis,
+     val:r.emphases?r.emphases.perMin.toFixed(1)+'/min':'n/v',
+     sub:r.emphases?emphTag(r.emphases.perMin):'n/v'},
+    {icon:'📝',label:'Sprachstruktur',  status:strukt.status,
+     val:strukt.label, sub:strukt.sub},
+  ];
+  document.getElementById('metricsGrid').innerHTML=cards.map(c=>`
+    <div class="metric-card ${c.status}${c.wide?' wide':''}">
+      <div class="metric-icon">${c.icon}</div>
+      <div class="metric-label">${c.label}</div>
+      <div class="metric-value">${c.val}</div>
+      <div class="metric-sub">${c.sub}</div>
+    </div>`).join('');
+}
+
+function tempoTag(w){const[lo,hi]=getTempoRange();if(w<lo-15)return'Zu langsam';if(w>hi+20)return'Zu schnell';if(w>hi)return'Leicht schnell';if(w<lo)return'Leicht langsam';return'Optimal';}
+function fillerTag(n,dur){const r=n/(dur/60);if(r<1)return'Sehr wenige';if(r<3)return'Akzeptabel';if(r<6)return'Auffällig viele';return'Sehr viele';}
+function livelyTag(v){if(v<30)return'Sehr monoton';if(v<50)return'Wenig lebendig';if(v<68)return'Mäßig lebendig';if(v<85)return'Lebendig';return'Sehr ausdrucksstark';}
+function pauseTag(ps,dur){const p=ps.length/(dur/60);if(!ps.length||p<5)return'Zu wenige Pausen';if(p>20)return'Fragmentiert/nervös';if(p>15)return'Etwas viele';return p.toFixed(1)+' / Min. – gut';}
+function melodyTag(st){if(st<2.5)return'Sehr monoton';if(st<4.5)return'Wenig Variation';if(st<7)return'Gute Melodie';return'Sehr ausdrucksstark';}
+function loudTag(cv){if(cv<0.2)return'Sehr gleichmäßig';if(cv<0.35)return'Mäßig dynamisch';return'Gut dynamisch';}
+function clarityTag(v){if(v<40)return'Schwer verständlich';if(v<65)return'Mäßig klar';if(v<80)return'Gut verständlich';return'Sehr klar';}
+function emphTag(v){if(v<1)return'Kaum Betonungen';if(v<3)return'Wenige Betonungen';if(v<7)return'Gute Dichte';return'Sehr betont';}
+
+// ── Detail card ───────────────────────────
+function renderDetails(r){
+  const vqLabel = r.voiceQ==null?'n/v':r.voiceQ>0.62?'Klar & rein':r.voiceQ>0.38?'Moderat':'Rau / flüstig';
+  const vqCls   = r.voiceQ==null?'':r.voiceQ>0.62?'di-good':r.voiceQ>0.38?'di-warn':'di-bad';
+  const enthVal = r.enthusiasm!=null?r.enthusiasm+'/100':'n/v';
+  const enthCls = r.enthusiasm==null?'':r.enthusiasm>65?'di-good':r.enthusiasm>40?'di-warn':'di-bad';
+  const langLabel = r.language&&r.language!=='german'?'Fremdsprach. Elemente':r.dialect||'Standarddeutsch';
+  const reg = r.pitch?calcPitchRegister(r.pitch.mean):null;
+
+  document.getElementById('detailCard').innerHTML=`
+    <h3>Weitere Merkmale</h3>
+    <div class="detail-grid">
+      <div class="di"><span class="di-label">Stimmklarheit</span><span class="di-val ${vqCls}">${vqLabel}</span></div>
+      <div class="di"><span class="di-label">Energie & Begeisterung</span><span class="di-val ${enthCls}">${enthVal}</span></div>
+      <div class="di"><span class="di-label">Grundtonlage</span><span class="di-val ${reg?reg.cls:'di-neu'}">${reg?reg.label:'n/v'}</span>${reg?`<span style="font-size:.68rem;color:var(--muted)">${reg.sub}</span>`:''}</div>
+      <div class="di"><span class="di-label">Dialekt / Akzent</span><span class="di-val di-neu">${langLabel}</span></div>
+    </div>`;
+}
+
+// ── Waveform canvas ───────────────────────
+function drawWave(r){
+  const cv=document.getElementById('waveCanvas'),dpr=devicePixelRatio;
+  cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  ctx.fillStyle='#0c1220'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#1e2d42'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+  r.pauses.forEach(p=>{
+    ctx.fillStyle='rgba(239,68,68,.13)';
+    ctx.fillRect((p.s/r.dur)*W,0,(p.d/r.dur)*W,H);
+  });
+  const wf=r.waveform,n=wf.length;
+  ctx.fillStyle='rgba(14,165,160,.14)'; ctx.beginPath();
+  for(let i=0;i<n;i++){const x=(i/n)*W,y=H/2-wf[i]*H*.46;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+  for(let i=n-1;i>=0;i--)ctx.lineTo((i/n)*W,H/2+wf[i]*H*.46);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='#0ea5a0'; ctx.lineWidth=1.5*dpr;
+  ctx.beginPath();
+  for(let i=0;i<n;i++){const x=(i/n)*W,y=H/2-wf[i]*H*.46;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+  ctx.stroke(); ctx.beginPath();
+  for(let i=0;i<n;i++){const x=(i/n)*W,y=H/2+wf[i]*H*.46;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+  ctx.stroke();
+}
+
+// ── Pitch canvas ──────────────────────────
+function drawPitch(r){
+  const cv=document.getElementById('pitchCanvas'),dpr=devicePixelRatio;
+  cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr;
+  const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  ctx.fillStyle='#0c1220'; ctx.fillRect(0,0,W,H);
+  const minF=70,maxF=400,toY=f=>H-((f-minF)/(maxF-minF))*H;
+  [100,150,200,250,300,350].forEach(f=>{
+    if(f<minF||f>maxF)return;
+    const y=toY(f);
+    ctx.strokeStyle='#1a2a3a'; ctx.lineWidth=1; ctx.setLineDash([4,5]);
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle='#3a5068'; ctx.font=`${9*dpr}px sans-serif`;
+    ctx.fillText(f+' Hz',3*dpr,y-3*dpr);
+  });
+  ctx.strokeStyle='#f59e0b'; ctx.lineWidth=2*dpr; ctx.lineCap=ctx.lineJoin='round';
+  const{pitches,times,dur}=r; let inSeg=false;
+  pitches.forEach((f0,i)=>{
+    if(f0>minF&&f0<maxF){
+      const x=(times[i]/dur)*W,y=Math.max(1,Math.min(H-1,toY(f0)));
+      if(!inSeg){ctx.beginPath();ctx.moveTo(x,y);inSeg=true;}else ctx.lineTo(x,y);
+    }else{if(inSeg){ctx.stroke();inSeg=false;}}
+  });
+  if(inSeg)ctx.stroke();
+  ctx.fillStyle='#fbbf24';
+  pitches.forEach((f0,i)=>{
+    if(f0>minF&&f0<maxF){
+      const x=(times[i]/dur)*W,y=Math.max(1,Math.min(H-1,toY(f0)));
+      ctx.beginPath(); ctx.arc(x,y,2.5*dpr,0,Math.PI*2); ctx.fill();
+    }
+  });
+  if(pitches.filter(p=>p>minF&&p<maxF).length<3){
+    ctx.fillStyle='#3a5068'; ctx.font=`${11*dpr}px sans-serif`; ctx.textAlign='center';
+    ctx.fillText('Zu wenige stimmhafte Segmente erkannt',W/2,H/2);
+  }
+}
+
+// ── Gesamteindruck ────────────────────────
+function calcGesamteindruck(r){
+  const fc=fillerTotal(r.fillers)+(r.audioFillers||0);
+  const fpm=r.dur>0?fc/(r.dur/60):0;
+  const[lo,hi]=getTempoRange();
+
+  // Verständlichkeit
+  const clarBase=r.clarity!=null?r.clarity:65;
+  let tempoV=80;
+  if(r.tempo){const w=r.tempo.wpm;tempoV=w>=lo&&w<=hi?100:w>hi+15?50:w>hi?75:w<lo-15?60:80;}
+  const fillerV=Math.max(0,100-fpm*12);
+  const vqV=r.voiceQ!=null?r.voiceQ*100:65;
+  const verstaendlichkeit=Math.max(0,Math.min(100,Math.round(clarBase*.40+tempoV*.30+fillerV*.20+vqV*.10)));
+
+  // Wirkung
+  const melodyW=r.pitch?Math.min(100,(r.pitch.stRMS/8)*100):35;
+  const emphW=r.emphases?Math.min(100,(r.emphases.perMin/6)*100):35;
+  const wirkung=Math.max(0,Math.min(100,Math.round(r.liveliness*.50+melodyW*.30+emphW*.20)));
+
+  // Souveränität
+  const fillerS=Math.max(20,100-fpm*16);
+  const ppm=r.pauses.length/(r.dur/60);
+  const pauseS=r.dur>15?(ppm>=5&&ppm<=15?100:ppm>=3?80:40):70;
+  const cjpm=(r.conjunctions||0)/(r.dur/60);
+  let tempoS=80;
+  if(r.tempo){const w=r.tempo.wpm;tempoS=w>=lo&&w<=hi?100:w>hi+20?50:w>hi?75:72;}
+  const conjS=Math.max(0,100-cjpm*10);
+  const souveraenitaet=Math.max(0,Math.min(100,Math.round(fillerS*.40+pauseS*.30+tempoS*.20+conjS*.10)));
+
+  return{verstaendlichkeit,wirkung,souveraenitaet};
+}
+
+function eindruckLabel(s){
+  if(s>=80)return{txt:'Sehr gut',cls:'good'};
+  if(s>=65)return{txt:'Gut',cls:'good'};
+  if(s>=48)return{txt:'Ausbaubar',cls:'warn'};
+  return{txt:'Schwach',cls:'bad'};
+}
+
+function eindruckBarColor(s){
+  if(s>=80)return'var(--good)';if(s>=50)return'var(--warn)';return'var(--bad)';
+}
+
+function eindruckTexts(r,scores){
+  const fc=fillerTotal(r.fillers)+(r.audioFillers||0);
+  const fpm=r.dur>0?fc/(r.dur/60):0;
+  const[lo,hi]=getTempoRange();
+  const ppm=r.pauses.length/(r.dur/60);
+
+  // Verständlichkeit
+  const vp=[];
+  if(r.clarity!=null)vp.push(r.clarity>=80?'Aussprache sehr klar erkannt':r.clarity<55?'Aussprache teils schwer verständlich':'Aussprache gut verständlich');
+  if(r.tempo){const w=r.tempo.wpm;if(w>hi+15)vp.push(`Tempo ${Math.round(w)} WpM etwas zu schnell`);else if(w>=lo&&w<=hi)vp.push(`Tempo ${Math.round(w)} WpM ideal`);}
+  if(fc===0)vp.push('keine Fülllaute');
+  else if(fpm>4)vp.push(`${fc} Fülllaute unterbrechen den Redefluss`);
+  else if(fpm>2)vp.push(`${fc} Fülllaute – noch akzeptabel`);
+
+  // Wirkung
+  const wp=[];
+  wp.push(r.liveliness>=68?'Stimme klingt lebendig und ansprechend':r.liveliness<40?'Stimme wirkt wenig abwechslungsreich':'Stimme mäßig lebendig');
+  if(r.pitch){if(r.pitch.stRMS>=4.5)wp.push('gute Stimmmelodie hält Zuhörer bei der Stange');else if(r.pitch.stRMS<2.5)wp.push('kaum Stimmvariation – wirkt monoton');}
+  if(r.emphases){if(r.emphases.perMin>=3)wp.push(`${r.emphases.perMin.toFixed(1)} Betonungen/min setzen Akzente`);else if(r.emphases.perMin<1&&r.dur>20)wp.push('zu wenige Betonungen');}
+
+  // Souveränität
+  const sp=[];
+  if(fc===0)sp.push('Keine Fülllaute – sehr selbstsicher');
+  else if(fpm<=2)sp.push(`Wenige Fülllaute (${fc} gesamt) – wirkt sicher`);
+  else if(fpm>4)sp.push(`Viele Fülllaute (${fpm.toFixed(1)}/min) – lassen Unsicherheit erahnen`);
+  else sp.push(`${fc} Fülllaute – noch souverän`);
+  if(r.dur>15){if(ppm>=5)sp.push('Pausen strahlen Gelassenheit aus');else if(ppm<3)sp.push('fehlende Pausen wirken gehetzt');}
+  const cjpm=(r.conjunctions||0)/(r.dur/60);
+  if(cjpm>8)sp.push('häufige Konjunktionsbrücken statt Pausen');
+
+  return{
+    v:vp.length?vp.join(', ')+'.':'Zu wenig Daten für eine Bewertung.',
+    w:wp.length?wp.join(', ')+'.':'Zu wenig Daten für eine Bewertung.',
+    s:sp.length?sp.join(', ')+'.':'Zu wenig Daten für eine Bewertung.'
+  };
+}
+
+function renderEindruck(r){
+  const scores=calcGesamteindruck(r);
+  const texts=eindruckTexts(r,scores);
+  const rows=[
+    {label:'Verständlichkeit',q:'Klinge ich klar und verständlich?',score:scores.verstaendlichkeit,txt:texts.v},
+    {label:'Wirkung',          q:'Klinge ich engaging und interessant?',score:scores.wirkung,txt:texts.w},
+    {label:'Souveränität',     q:'Wirke ich sicher und überzeugend?',score:scores.souveraenitaet,txt:texts.s},
+  ];
+  const scoredRows=rows.map(row=>{
+    const l=eindruckLabel(row.score);
+    return`<div class="ei-row">
+      <div class="ei-top">
+        <span class="ei-label">${row.label} <span style="font-weight:400;color:var(--muted);font-size:.75rem">– ${row.q}</span></span>
+        <span class="ei-badge ${l.cls}">${l.txt} · ${row.score}/100</span>
+      </div>
+      <div class="ei-bar-wrap"><div class="ei-bar-fill" style="width:${row.score}%;background:${eindruckBarColor(row.score)}"></div></div>
+      <div class="ei-text">${row.txt}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('eindruckCard').innerHTML=`
+    <h3>Gesamteindruck</h3>
+    <p class="ei-intro">Kombinierte Bewertung auf Basis aller gemessenen Werte</p>
+    ${scoredRows}`;
+}
+
+// ── Feedback ──────────────────────────────
+function buildFeedback(r){
+  const s={},pos=[],imp=[];
+
+  // Tempo (personalisiert nach Zweck + Alter)
+  if(r.tempo){
+    const w=r.tempo.wpm,wR=Math.round(w);
+    const[lo,hi]=getTempoRange();
+    const purposeNames={praesentation:'Präsentationen',podcast:'Podcasts/Videos',alltag:'Gespräche',buehne:'Bühnenauftritte'};
+    const ctx=purposeNames[userProfile.purpose]||'diesen Zweck';
+    if(w<lo-15){s.tempo='bad';imp.push({lvl:'improvement',txt:`Sprechtempo ${wR} WpM – zu langsam für ${ctx} (Ziel: ${lo}–${hi} WpM). Etwas zügiger sprechen hält die Aufmerksamkeit.`});}
+    else if(w>hi+20){s.tempo='bad';imp.push({lvl:'critical',txt:`${wR} WpM – zu schnell für ${ctx} (Ziel: ${lo}–${hi} WpM). Verlangsame bewusst, besonders bei wichtigen Aussagen.`});}
+    else if(w>hi){s.tempo='warn';imp.push({lvl:'improvement',txt:`${wR} WpM – leicht schnell für ${ctx} (Ziel bis ${hi} WpM). An Schlüsselstellen bewusst langsamer werden.`});}
+    else if(w<lo){s.tempo='warn';imp.push({lvl:'improvement',txt:`${wR} WpM – leicht langsam für ${ctx} (Ziel ab ${lo} WpM). Ein etwas flüssigeres Tempo würde helfen.`});}
+    else{s.tempo='good';pos.push({txt:`Sprechtempo ${wR} WpM – ideal für ${ctx} (Ziel: ${lo}–${hi} WpM).`});}
+  }else s.tempo='warn';
+
+  // Fillers — rate-based thresholds + Lieblingsfüllwort
+  const fc=fillerTotal(r.fillers)+(r.audioFillers||0),rpm=r.dur>0?fc/(r.dur/60):0;
+  const transcriptPart=topF(r.fillers,20);
+  const audioPart=(r.audioFillers||0)>0?`+${r.audioFillers} audio-erkannt`:'';
+  const fillerList=[transcriptPart,audioPart].filter(Boolean).join(' · ');
+  const topFiller=Object.entries(r.fillers).sort((a,b)=>b[1]-a[1])[0];
+  const favStr=topFiller&&topFiller[1]>1?`Dein Lieblingsfüllwort: „${topFiller[0]}" (${topFiller[1]}×) – übe, es bewusst zu vermeiden. `:'';
+  if(fc===0){
+    s.filler='good';pos.push({txt:'Keine Füllwörter erkannt – klingt sicher und professionell.'});
+  }else if(rpm<0.4){
+    s.filler='good';pos.push({txt:`Nur ${fc} Füllwort${fc!==1?'e':''} (${rpm.toFixed(1)}/min) – sehr professionell.${favStr?` ${favStr}`:''}`});
+  }else if(rpm<1.0){
+    s.filler='warn';imp.push({lvl:'improvement',txt:`${fc} Füllwörter (${rpm.toFixed(1)}/min): ${fillerList}. ${favStr}Noch akzeptabel, aber bewusst reduzieren.`});
+  }else if(rpm<3.0){
+    s.filler='bad';imp.push({lvl:'critical',txt:`${fc} Füllwörter (${rpm.toFixed(1)}/min): ${fillerList}. ${favStr}Übe, in Denkpausen ruhig zu bleiben.`});
+  }else{
+    s.filler='bad';imp.push({lvl:'critical',txt:`${fc} Füllwörter (${rpm.toFixed(1)}/min) – deutlich zu viele. ${favStr}Bewusste Stille ist besser als Fülllaute.`});
+  }
+
+  // Liveliness (combined, stricter)
+  const lv=r.liveliness;
+  if(lv<50){s.lively='bad';imp.push({lvl:'critical',txt:`Sehr monoton – du klingst desinteressiert. Lebendigkeit ${lv}/100.`});}
+  else if(lv<68){s.lively='warn';imp.push({lvl:'improvement',txt:`Lebendigkeit ${lv}/100 – ausbaubar. Variiere Tonhöhe und Lautstärke bewusst.`});}
+  else{s.lively='good';pos.push({txt:`Lebendigkeit ${lv}/100 – deine Stimme klingt dynamisch und ansprechend.`});}
+
+  // Melody (pitch only, strict thresholds)
+  if(r.pitch){
+    const st=r.pitch.stRMS;
+    if(st<4.0){s.melody='bad';imp.push({lvl:'critical',txt:`Kaum Variation – deine Stimme klingt flach (±${st.toFixed(1)} Halbtöne). Lass die Stimme auf betonten Silben deutlich steigen und fallen.`});}
+    else{s.melody='good';pos.push({txt:`Gute Stimmmelodie (±${st.toFixed(1)} Halbtöne) – die Tonhöhe variiert ausdrucksstark.`});}
+  }else s.melody='warn';
+
+  // Loudness dynamics
+  if(r.loudness){
+    const cv=r.loudness.cv;
+    if(cv<0.2){s.loudness='bad';imp.push({lvl:'improvement',txt:`Lautstärkedynamik sehr gering (${(cv*100).toFixed(0)}%). Schwillt die Lautstärke an wichtigen Stellen an, entsteht natürliche Betonung.`});}
+    else if(cv<0.35){s.loudness='warn';}
+    else{s.loudness='good';pos.push({txt:`Gute Lautstärkedynamik (${(cv*100).toFixed(0)}%) – du variierst die Lautstärke bewusst.`});}
+  }else s.loudness='warn';
+
+  // Clarity
+  if(r.clarity!=null){
+    if(r.clarity<40){s.clarity='bad';imp.push({lvl:'critical',txt:`Verständlichkeit ${r.clarity}/100 – die KI hatte Mühe, dich zu verstehen. Klarere Aussprache und langsameres Tempo würden helfen.`});}
+    else if(r.clarity<65){s.clarity='warn';imp.push({lvl:'improvement',txt:`Verständlichkeit ${r.clarity}/100 – manche Stellen sind schwerer verständlich. Achte auf klare Konsonanten.`});}
+    else{s.clarity='good';pos.push({txt:`Gute Verständlichkeit (${r.clarity}/100) – du wirst klar und deutlich verstanden.`});}
+  }else s.clarity='warn';
+
+  // Emphasis
+  if(r.emphases){
+    const ep=r.emphases.perMin;
+    if(ep<1&&r.dur>20){s.emphasis='bad';imp.push({lvl:'improvement',txt:`Kaum Betonungen erkannt (${ep.toFixed(1)}/min). Hebe wichtige Wörter durch Tonhöhe UND Lautstärke hervor.`});}
+    else if(ep<3){s.emphasis='warn';}
+    else{s.emphasis='good';pos.push({txt:`Gute Betonungsdichte (${ep.toFixed(1)}/min) – Schlüsselwörter werden hervorgehoben.`});}
+  }else s.emphasis='warn';
+
+  // Pauses + conjunction-as-pause detection
+  const np=r.pauses.length,ppm=np/(r.dur/60),cj=r.conjunctions||0;
+  const tooFew=r.dur>15&&ppm<5;
+  if(tooFew&&cj>4){
+    s.pauses='bad';
+    imp.push({lvl:'improvement',txt:`Zu wenige Pausen – stattdessen ${cj}× Konjunktionen am Satzanfang (und/oder/dann/weil …). Ersetze das nächste „und dann" durch eine kurze bewusste Pause.`});
+  }else if(tooFew){
+    s.pauses='bad';
+    imp.push({lvl:'improvement',txt:`Zu wenige Sprechpausen erkannt. Gezielte Pausen geben Zuhörern Zeit zum Nachdenken und lassen wichtige Aussagen wirken.`});
+  }else if(cj>5){
+    s.pauses='warn';
+    imp.push({lvl:'improvement',txt:`${cj}× Konjunktionen am Satzanfang erkannt (und/oder/dann …). Oft ist eine kurze Pause wirkungsvoller als ein verbindendes „und".`});
+  }else{
+    s.pauses='good';
+    pos.push({txt:'Gute Pausenstruktur – Sätze werden klar abgeschlossen ohne übermäßige Konjunktionsbrücken.'});
+  }
+
+  // Satzverbindungen: >30% Sätze mit Konjunktion = Warnung
+  if(r.sprachstruktur&&r.sprachstruktur.sents>=4&&r.sprachstruktur.connRatio>0.30){
+    const pct=Math.round(r.sprachstruktur.connRatio*100);
+    imp.push({lvl:'improvement',txt:`${pct}% deiner Sätze beginnen mit und/dann/weil/also/wenn. Du verbindest Sätze statt sie abzuschließen. Mach mehr Punkte.`});
+  }
+
+  // "und" – Gesamtzahl, ab 4 Warnung
+  const undCount=r.undTotal||0;
+  if(undCount>3){
+    imp.push({lvl:'critical',txt:`Du verwendest „und" ${undCount}× – deine Sätze sind zu lang. Mach einen Punkt statt „und" zu sagen.`});
+  }
+
+  // Satzende-Intonation: >50% steigende Satzenden = Warnung
+  if(r.sentEndIntonation&&r.sentEndIntonation.ratio>0.50){
+    const pct=Math.round(r.sentEndIntonation.ratio*100);
+    imp.push({lvl:'improvement',txt:`Deine Sätze klingen wie Fragen – die Stimme sollte am Satzende fallen, nicht steigen (${pct}% der Satzenden steigend).`});
+  }
+
+  return{s,pos,imp};
+}
+
+function topF(fw,n){
+  return Object.entries(fw).sort((a,b)=>b[1]-a[1]).slice(0,n)
+    .map(([w,c])=>`„${w}" (${c}×)`).join(', ');
+}
+
+function renderFeedback(fb){
+  let html='<h3>Detailliertes Feedback</h3>';
+  if(fb.pos.length){
+    html+='<div class="fg-title">Das läuft bereits gut</div>';
+    fb.pos.forEach(x=>{html+=`<div class="fi positive"><span>✓</span><span>${x.txt}</span></div>`;});
+  }
+  if(fb.imp.length){
+    html+='<div class="fg-title">Daran arbeiten</div>';
+    fb.imp.forEach(x=>{html+=`<div class="fi ${x.lvl}"><span>${x.lvl==='critical'?'!':'→'}</span><span>${x.txt}</span></div>`;});
+  }
+  if(!fb.pos.length&&!fb.imp.length)
+    html+='<p style="color:var(--muted);font-size:.87rem">Zu wenig Daten – mind. 20 Sekunden aufnehmen.</p>';
+  document.getElementById('feedbackCard').innerHTML=html;
+}
+
+// ── Transcript ────────────────────────────
+function renderTranscript(r){
+  const el=document.getElementById('transcriptFinal'),lg=document.getElementById('fillerLegend');
+  if(!r.text?.trim()){el.innerHTML='<span class="no-text">Kein Text erkannt.</span>';return;}
+  let text=r.text.trim();
+  let anyHit=false;
+  // Highlight all fillers from the full list (umlaut-safe boundaries)
+  FILLERS.forEach(f=>{
+    const esc=f.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const re=new RegExp('(?<![a-zA-ZäöüÄÖÜß])'+esc+'(?![a-zA-ZäöüÄÖÜß])','gi');
+    const replaced=text.replace(re,'<mark class="filler-hl">$&</mark>');
+    if(replaced!==text){anyHit=true;text=replaced;}
+  });
+  // Highlight every standalone "und"
+  const undReplaced=text.replace(/\bund\b/gi,'<mark class="filler-hl">$&</mark>');
+  if(undReplaced!==text){anyHit=true;text=undReplaced;}
+
+  if(anyHit)lg.textContent='— Füllwörter rot hervorgehoben';
+  el.innerHTML=text;
+}
+
+// ═══════════════════════════════════════════
+//  RESET
+// ═══════════════════════════════════════════
+function resetApp(){
+  audioChunks=[]; recDuration=0;
+  ['resultsSection','analyzingState'].forEach(id=>(document.getElementById(id).style.display='none'));
+  // Restore analyzingState structure (catch block may have appended elements)
+  document.getElementById('analyzingState').innerHTML=
+    '<div class="spinner"></div>'+
+    '<div id="analyzingMsg">Wird transkribiert …</div>'+
+    '<div id="analyzingSubMsg">Audio wird an OpenAI Whisper übertragen</div>';
+  document.getElementById('recordSection').style.display='block';
+  document.getElementById('recordBtn').classList.remove('active');
+  document.getElementById('iconMic').style.display='block';
+  document.getElementById('iconStop').style.display='none';
+  document.getElementById('statusText').textContent='Aufnahme starten';
+  document.getElementById('timerText').style.display='none';
+  document.getElementById('timerText').textContent='0:00';
+  document.getElementById('hintText').textContent='Sprich mindestens 30 Sekunden für eine aussagekräftige Analyse';
+  const cv=document.getElementById('liveCanvas');
+  cv.getContext('2d').clearRect(0,0,cv.width,cv.height);
+}
+</script>
+</body>
+</html>
